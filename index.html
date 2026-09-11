@@ -58,7 +58,7 @@
   <div id="setup" hidden>
     <h3>One-time setup</h3>
     <div>Paste your Apps Script Web App URL (from Deploy → Manage deployments in Apps Script):</div>
-    <input id="apiUrlInput" placeholder="https://script.google.com/macros/s/AKfycbwwjrIuK7BLmEU_byRTg9C0PsWATBnbPRtOMvaYtklwMecaXE9aWWYP8Ou_d8lvbzMm/exec" />
+    <input id="apiUrlInput" placeholder="https://script.google.com/a/macros/spjimr.org/s/.../exec" />
     <button onclick="saveApiUrl()">Save</button>
   </div>
 
@@ -84,8 +84,12 @@
   </div>
 
 <script>
+  // Hardcoded default API URL — used if localStorage is empty.
+  // Change this here and re-commit if the URL ever changes.
+  const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbwwjrIuK7BLmEU_byRTg9C0PsWATBnbPRtOMvaYtklwMecaXE9aWWYP8Ou_d8lvbzMm/exec';
+
   const LS_KEY = 'gate_api_url';
-  let API_URL = localStorage.getItem(LS_KEY) || '';
+  let API_URL = localStorage.getItem(LS_KEY) || DEFAULT_API_URL;
 
   const setupEl = document.getElementById('setup');
   const mainEl = document.getElementById('main');
