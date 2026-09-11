@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gate Scanner</title>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/html5-qrcode.min.js"></script>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0;
+           padding: 12px; max-width: 500px; margin: 0 auto; background: #fafafa; }
+    h1 { font-size: 1.1rem; margin: 0 0 8px; }
+    .muted { color: #666; font-size: 0.85rem; margin: 4px 0 12px; }
+    #reader { width: 100%; border-radius: 8px; overflow: hidden; background: #000; min-height: 240px; }
+    #result { margin-top: 14px; padding: 20px; border-radius: 10px; text-align: center;
+              display: none; }
+    #result strong { display: block; font-size: 1.6rem; margin-bottom: 6px; }
+    #result .sub { font-size: 1rem; margin: 2px 0; }
+    #result .id { font-size: 0.8rem; opacity: 0.7; margin-top: 6px;
+                  font-family: ui-monospace, monospace; word-break: break-all; }
+    .approved { background: #d1e7dd; color: #0a3622; border: 3px solid #198754; }
+    .used     { background: #f8d7da; color: #58151c; border: 3px solid #dc3545; }
+    .invalid  { background: #f8d7da; color: #58151c; border: 3px solid #dc3545; }
+    .error    { background: #fff3cd; color: #664d03; border: 3px solid #ffc107; }
+    .fallback { margin-top: 12px; display: flex; gap: 6px; }
+    .fallback input { flex: 1; padding: 10px; font-size: 1rem;
+                      border: 1px solid #bbb; border-radius: 6px; }
+    .fallback button { padding: 10px 16px; font-size: 1rem; border: 0;
+                       background: #0d6efd; color: white; border-radius: 6px; cursor: pointer; }
+    #status { font-size: 0.8rem; color: #888; margin-top: 8px; text-align: center; }
+    .config-warn { background: #fff3cd; color: #664d03; padding: 8px 12px;
+                   border-radius: 6px; font-size: 0.85rem; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Gate scanner</h1>
+  <p class="muted">Point at the ticket QR. Green = allow entry. Red = do not allow.</p>
+
+  <div id="config-warn" class="config-warn" hidden>
+    ⚠️ API_URL not set. Edit this HTML file and paste your Apps Script Web App URL where it says PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE.
+  </div>
+
+  <div id="reader"></div>
+
+  <div class="fallback">
+    <input id="manualId" placeholder="Or type ticket ID (e.g. TKT-XXXX)" autocomplete="off" autocapitalize="characters" />
+    <button onclick="manualValidate()">Check</button>
+  </div>
+
+  <div id="result"></div>
+  <div id="status">Ready</div>
+
+<script>
+  // ------------------------------------------------------------------
+  // EDIT THIS LINE: paste the Apps Script Web App URL from your Apps
+  // Script "Manage deployments" page. It looks like:
+  //   https://script.google.com/a/macros/spjimr.org/s/AKfycb.../exec
+  // Keep the quotes around it.
+  // ------------------------------------------------------------------
+  const API_URL = 'https://script.google.com/a/macros/spjimr.org/s/AKfycbzV4paEZnPW3oqtnTUB3XT-MNF_Ka-Zw0KF3ObmHbZoq8VG-rjuoAJR4Ybl86DLbBgM/exec';
+
+  const resultEl = document.getElementById('result');
+  const statusEl = document.getElementById('status');
+  const configWarn = document.getElementById('config-warn');
+  let busy = false;
+  let lastId = null;
+  let lastTs = 0;
+
+  if (!API_URL || API_URL === 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE') {
+    configWarn.hidden = false;
+  }
+
+  function showResult(res, ticketId) {
+    resultEl.style.display = 'block';
+    resultEl.className = res.status;
+    let html = '<strong>' + res.message + '</strong>';
+    if (res.name)   html += '<div class="sub">Name: ' + res.name + '</div>';
+    if (res.usedAt) html += '<div class="sub">Time: ' + res.usedAt + '</div>';
+    html += '<div class="id">' + ticketId + '</div>';
+    resultEl.innerHTML = html;
+    try {
+      navigator.vibrate && navigator.vibrate(res.status === 'approved' ? 150 : [100,80,100,80,100]);
+    } catch(_){}
+    statusEl.textContent = 'Ready';
+    setTimeout(() => { resultEl.style.display = 'none'; busy = false; }, 4500);
+  }
+
+  async function validate(ticketId) {
+    if (busy) return;
+    busy = true;
+    statusEl.textContent = 'Checking ' + ticketId + ' …';
+    try {
+      const res = await fetch(API_URL + '?ticket=' + encodeURIComponent(ticketId), {
+        method: 'GET',
+        redirect: 'follow',
+      });
+      const json = await res.json();
+      showResult(json, ticketId);
+    } catch (err) {
+      showResult({ status: 'error', message: 'Network/API error: ' + err }, ticketId);
+    }
+  }
+
+  function manualValidate() {
+    const id = document.getElementById('manualId').value.trim();
+    if (id) { validate(id); document.getElementById('manualId').value = ''; }
+  }
+  document.getElementById('manualId').addEventListener('keydown', e => {
+    if (e.key === 'Enter') manualValidate();
+  });
+
+  function onScan(decodedText) {
+    const now = Date.now();
+    if (decodedText === lastId && (now - lastTs) < 4500) return;
+    lastId = decodedText;
+    lastTs = now;
+    validate(decodedText.trim());
+  }
+
+  if (window.Html5Qrcode) {
+    const scanner = new Html5Qrcode('reader');
+    Html5Qrcode.getCameras().then(cameras => {
+      if (!cameras || !cameras.length) {
+        document.getElementById('reader').innerHTML =
+          '<p class="muted" style="color:#eee;padding:20px;">No camera detected. Use the manual field below.</p>';
+        return;
+      }
+      const camId = cameras[cameras.length - 1].id;   // prefer rear camera
+      scanner.start(camId, { fps: 10, qrbox: { width: 260, height: 260 } }, onScan, () => {})
+        .catch(err => {
+          document.getElementById('reader').innerHTML =
+            '<p class="muted" style="color:#eee;padding:20px;">Camera start failed: ' + err + '. Use manual field.</p>';
+        });
+    }).catch(err => {
+      document.getElementById('reader').innerHTML =
+        '<p class="muted" style="color:#eee;padding:20px;">Camera access denied: ' + err + '. Use manual field.</p>';
+    });
+  }
+</script>
+</body>
+</html>
