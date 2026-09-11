@@ -9,14 +9,15 @@
     * { box-sizing: border-box; }
     body { font-family: system-ui, -apple-system, sans-serif; margin: 0;
            padding: 12px; max-width: 500px; margin: 0 auto; background: #fafafa; }
-    h1 { font-size: 1.1rem; margin: 0 0 8px; }
+    h1 { font-size: 1.15rem; margin: 0 0 8px; }
     .muted { color: #666; font-size: 0.85rem; margin: 4px 0 12px; }
-    #reader { width: 100%; border-radius: 8px; overflow: hidden;
-              background: #111; min-height: 260px; display: flex;
-              align-items: center; justify-content: center; color: #ccc;
-              font-size: 0.9rem; text-align: center; padding: 12px; }
-    #startBtn { display: block; width: 100%; padding: 14px; margin: 12px 0;
-                font-size: 1.1rem; border: 0; border-radius: 8px;
+    #video-wrap { width: 100%; background: #111; border-radius: 8px;
+                  overflow: hidden; min-height: 260px; position: relative;
+                  display: flex; align-items: center; justify-content: center; }
+    #video { width: 100%; height: 100%; max-height: 400px; object-fit: cover; display: block; }
+    #video-msg { color: #ccc; padding: 20px; text-align: center; font-size: 0.9rem; }
+    #startBtn { display: block; width: 100%; padding: 14px; margin: 10px 0;
+                font-size: 1.05rem; border: 0; border-radius: 8px;
                 background: #198754; color: white; cursor: pointer; font-weight: 600; }
     #startBtn:disabled { background: #6c757d; }
     #result { margin-top: 14px; padding: 20px; border-radius: 10px; text-align: center;
@@ -34,79 +35,100 @@
                       border: 1px solid #bbb; border-radius: 6px; }
     .fallback button { padding: 10px 16px; font-size: 1rem; border: 0;
                        background: #0d6efd; color: white; border-radius: 6px; cursor: pointer; }
-    #diag { font-size: 0.75rem; color: #333; background: #eee; padding: 8px;
+    #setup { background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px;
+             padding: 12px; margin-bottom: 12px; }
+    #setup h3 { margin: 0 0 6px; font-size: 1rem; }
+    #setup input { width: 100%; padding: 10px; font-size: 0.9rem; margin: 6px 0;
+                   border: 1px solid #bbb; border-radius: 6px; }
+    #setup button { padding: 10px 16px; font-size: 1rem; border: 0;
+                    background: #0d6efd; color: white; border-radius: 6px; cursor: pointer; }
+    #diag { font-size: 0.72rem; color: #333; background: #eee; padding: 8px;
             border-radius: 6px; margin-top: 8px; font-family: ui-monospace, monospace;
-            white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow: auto; }
-    .config-warn { background: #fff3cd; color: #664d03; padding: 8px 12px;
-                   border-radius: 6px; font-size: 0.85rem; margin-bottom: 8px; }
+            white-space: pre-wrap; word-break: break-all; max-height: 180px; overflow: auto; }
+    .row { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem;
+           margin-top: 6px; color: #666; }
+    .row a { color: #0d6efd; text-decoration: none; }
   </style>
 </head>
 <body>
+
   <h1>Gate scanner</h1>
   <p class="muted">Tap Start, allow camera, then point at the ticket QR.</p>
 
-  <div id="config-warn" class="config-warn" hidden>
-    ⚠️ API_URL not set. Edit this HTML file and paste your Apps Script Web App URL.
+  <div id="setup" hidden>
+    <h3>One-time setup</h3>
+    <div>Paste your Apps Script Web App URL (from Deploy → Manage deployments in Apps Script):</div>
+    <input id="apiUrlInput" placeholder="https://script.google.com/a/macros/spjimr.org/s/.../exec" />
+    <button onclick="saveApiUrl()">Save</button>
   </div>
 
-  <button id="startBtn" onclick="startCamera()">▶ Start Camera</button>
+  <div id="main" hidden>
+    <button id="startBtn" onclick="startCamera()">▶ Start Camera</button>
 
-  <div id="reader">Camera off — tap "Start Camera" above.</div>
+    <div id="video-wrap">
+      <div id="video-msg">Camera off — tap "Start Camera" above.</div>
+      <video id="video" playsinline autoplay muted hidden></video>
+    </div>
 
-  <div class="fallback">
-    <input id="manualId" placeholder="Or type ticket ID (e.g. TKT-XXXX)" autocomplete="off" />
-    <button onclick="manualValidate()">Check</button>
+    <div class="fallback">
+      <input id="manualId" placeholder="Or type ticket ID (e.g. TKT-XXXX)" autocomplete="off" />
+      <button onclick="manualValidate()">Check</button>
+    </div>
+
+    <div id="result"></div>
+    <div id="diag">[boot] ready</div>
+    <div class="row">
+      <span id="apiHint"></span>
+      <a href="#" onclick="resetApiUrl(); return false;">Change API URL</a>
+    </div>
   </div>
-
-  <div id="result"></div>
-  <div id="diag">[boot] page loaded</div>
 
 <script>
-  // ------------------------------------------------------------------
-  // EDIT: paste the Apps Script Web App URL between the quotes.
-  // ------------------------------------------------------------------
-  const API_URL = 'https://script.google.com/a/macros/spjimr.org/s/AKfycbzV4paEZnPW3oqtnTUB3XT-MNF_Ka-Zw0KF3ObmHbZoq8VG-rjuoAJR4Ybl86DLbBgM/exec';
+  const LS_KEY = 'gate_api_url';
+  let API_URL = localStorage.getItem(LS_KEY) || '';
 
+  const setupEl = document.getElementById('setup');
+  const mainEl = document.getElementById('main');
+  const videoEl = document.getElementById('video');
+  const videoMsg = document.getElementById('video-msg');
+  const startBtn = document.getElementById('startBtn');
   const diagEl = document.getElementById('diag');
   const resultEl = document.getElementById('result');
-  const readerEl = document.getElementById('reader');
-  const startBtn = document.getElementById('startBtn');
-  const configWarn = document.getElementById('config-warn');
-  let busy = false;
-  let lastId = null;
-  let lastTs = 0;
-  let scanner = null;
+  const apiHint = document.getElementById('apiHint');
 
   function log(msg) {
     diagEl.textContent += '\n' + new Date().toTimeString().slice(0, 8) + ' ' + msg;
     diagEl.scrollTop = diagEl.scrollHeight;
   }
 
-  if (!API_URL || API_URL === 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE') {
-    configWarn.hidden = false;
-    log('WARN: API_URL not set — edit HTML');
+  function showSetup() {
+    setupEl.hidden = false;
+    mainEl.hidden = true;
+    if (API_URL) document.getElementById('apiUrlInput').value = API_URL;
   }
-
-  // Try to load html5-qrcode from a chain of CDNs.
-  const CDN_URLS = [
-    'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.10/html5-qrcode.min.js',
-    'https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.10/html5-qrcode.min.js',
-    'https://unpkg.com/html5-qrcode@2.3.10/html5-qrcode.min.js',
-  ];
-
-  function loadLibrary(i) {
-    if (i >= CDN_URLS.length) {
-      log('ERROR: all CDNs failed. Camera scan unavailable — use manual field.');
-      return;
-    }
-    log('loading library from CDN ' + (i + 1) + '…');
-    const s = document.createElement('script');
-    s.src = CDN_URLS[i];
-    s.onload = () => log('library loaded (Html5Qrcode ready)');
-    s.onerror = () => { log('CDN ' + (i + 1) + ' failed'); loadLibrary(i + 1); };
-    document.head.appendChild(s);
+  function showMain() {
+    setupEl.hidden = true;
+    mainEl.hidden = false;
+    apiHint.textContent = 'API: ' + (API_URL.slice(0, 60)) + (API_URL.length > 60 ? '…' : '');
+    log('BarcodeDetector: ' + ('BarcodeDetector' in window ? 'available (native)' : 'NOT available — will need manual entry'));
+    log('camera: ' + (navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? 'API available' : 'NOT available'));
   }
-  loadLibrary(0);
+  function saveApiUrl() {
+    const v = document.getElementById('apiUrlInput').value.trim();
+    if (!v) return alert('Paste the URL first.');
+    if (!v.startsWith('https://')) return alert('Must start with https://');
+    localStorage.setItem(LS_KEY, v);
+    API_URL = v;
+    showMain();
+  }
+  function resetApiUrl() { showSetup(); }
+
+  if (!API_URL) showSetup(); else showMain();
+
+  // ---------- validation ----------
+  let busy = false;
+  let lastId = null;
+  let lastTs = 0;
 
   function showResult(res, ticketId) {
     resultEl.style.display = 'block';
@@ -127,17 +149,17 @@
     busy = true;
     log('validate ' + ticketId);
     try {
-      const res = await fetch(API_URL + '?ticket=' + encodeURIComponent(ticketId), {
-        method: 'GET', redirect: 'follow',
-      });
+      const res = await fetch(API_URL + (API_URL.includes('?') ? '&' : '?') + 'ticket=' + encodeURIComponent(ticketId),
+                              { method: 'GET', redirect: 'follow' });
       const text = await res.text();
       let json;
       try { json = JSON.parse(text); }
       catch (_) {
-        log('bad JSON from API: ' + text.slice(0, 120));
+        log('non-JSON response: ' + text.slice(0, 120));
         showResult({ status:'error', message:'API returned non-JSON (auth wall?)' }, ticketId);
         return;
       }
+      log('result: ' + json.status);
       showResult(json, ticketId);
     } catch (err) {
       log('fetch failed: ' + err);
@@ -161,47 +183,82 @@
     validate(decodedText.trim());
   }
 
+  // ---------- camera + native BarcodeDetector ----------
+  let scanning = false;
+  let detector = null;
+
   async function startCamera() {
-    if (!window.Html5Qrcode) {
-      log('library not loaded yet, retrying in 1s…');
-      setTimeout(startCamera, 1000);
-      return;
-    }
     startBtn.disabled = true;
     startBtn.textContent = 'Starting…';
-    readerEl.textContent = '';
+    videoMsg.textContent = '';
     try {
-      // First: get camera permission via a direct navigator.mediaDevices call.
-      // Some Android browsers won't prompt when html5-qrcode calls getUserMedia
-      // indirectly. Doing it here as a user-gesture-driven call is more reliable.
-      log('requesting camera permission…');
-      const testStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }, audio: false
+      log('requesting camera…');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } }, audio: false
       });
-      testStream.getTracks().forEach(t => t.stop());
-      log('permission granted');
+      videoEl.srcObject = stream;
+      videoEl.hidden = false;
+      videoMsg.style.display = 'none';
+      await videoEl.play();
+      log('camera stream live');
 
-      scanner = new Html5Qrcode('reader');
-      const cameras = await Html5Qrcode.getCameras();
-      log('cameras found: ' + cameras.length);
-      if (!cameras.length) throw new Error('No cameras');
-      const camId = cameras[cameras.length - 1].id;
-      await scanner.start(camId, { fps: 10, qrbox: { width: 260, height: 260 } }, onScan, () => {});
-      log('scanner started (cam id ' + camId.slice(-8) + ')');
+      if ('BarcodeDetector' in window) {
+        try {
+          detector = new BarcodeDetector({ formats: ['qr_code'] });
+          log('BarcodeDetector ready — starting scan loop');
+          scanning = true;
+          scanLoop();
+        } catch (e) {
+          log('BarcodeDetector init failed: ' + e);
+          videoMsg.textContent = 'Auto-scan unavailable on this browser. Show QR, then type its ID into the field below.';
+          videoMsg.style.display = 'block';
+        }
+      } else {
+        log('BarcodeDetector NOT in browser — camera on but no auto-scan. Use manual field.');
+        videoMsg.textContent = 'Camera on but auto-scan unavailable on this browser. Use the manual field below to type the ticket ID.';
+        videoMsg.style.color = '#fff';
+        videoMsg.style.position = 'absolute';
+        videoMsg.style.top = '10px';
+        videoMsg.style.left = '10px';
+        videoMsg.style.right = '10px';
+        videoMsg.style.background = 'rgba(0,0,0,0.6)';
+        videoMsg.style.padding = '8px';
+        videoMsg.style.borderRadius = '4px';
+        videoMsg.style.display = 'block';
+      }
+
       startBtn.textContent = '⏸ Stop';
       startBtn.disabled = false;
       startBtn.onclick = stopCamera;
     } catch (err) {
       log('camera error: ' + (err && err.message || err));
-      readerEl.textContent = 'Camera failed: ' + (err && err.message || err) + '. Use manual field below.';
-      startBtn.textContent = '▶ Retry Start Camera';
+      videoMsg.textContent = 'Camera failed: ' + (err && err.message || err) + '. Use manual field below.';
+      videoMsg.style.display = 'block';
+      startBtn.textContent = '▶ Retry';
       startBtn.disabled = false;
     }
   }
 
-  async function stopCamera() {
-    try { await scanner.stop(); } catch (_) {}
-    readerEl.textContent = 'Camera stopped.';
+  async function scanLoop() {
+    if (!scanning) return;
+    try {
+      const codes = await detector.detect(videoEl);
+      if (codes && codes.length > 0) {
+        onScan(codes[0].rawValue);
+      }
+    } catch (_) {}
+    setTimeout(scanLoop, 250);   // ~4 scans/sec
+  }
+
+  function stopCamera() {
+    scanning = false;
+    if (videoEl.srcObject) {
+      videoEl.srcObject.getTracks().forEach(t => t.stop());
+      videoEl.srcObject = null;
+    }
+    videoEl.hidden = true;
+    videoMsg.textContent = 'Camera stopped.';
+    videoMsg.style.display = 'block';
     startBtn.textContent = '▶ Start Camera';
     startBtn.onclick = startCamera;
   }
